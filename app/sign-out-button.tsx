@@ -7,13 +7,15 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 
-export default function SignOutButton({ className }: { className?: string }) {
+export default function SignOutButton({ className, iconOnly = false }: { className?: string; iconOnly?: boolean }) {
   const [pending, setPending] = useState(false);
   const router = useRouter();
 
   return (
     <Button
       htmlType="button"
+      aria-label="ออกจากระบบ"
+      title={iconOnly ? "ออกจากระบบ" : undefined}
       loading={
         pending
           ? {
@@ -51,7 +53,7 @@ export default function SignOutButton({ className }: { className?: string }) {
       }}
       className={className}
     >
-      ออกจากระบบ
+      {iconOnly ? null : "ออกจากระบบ"}
     </Button>
   );
 }

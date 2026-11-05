@@ -2,10 +2,11 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { Alert, Button, Empty, Input, Modal, Select, Tag } from "antd";
-import { CalendarDays, Download } from "lucide-react";
+import { CalendarDays, Download, Pencil } from "lucide-react";
 import toast from "react-hot-toast";
 import { qualityDocumentVersionsAction, rescheduleQualityRevisionAction } from "./documents/version-actions";
 import QualityDocumentPreview from "./quality-document-preview";
+import QualityDocumentCorrection from "./quality-document-correction";
 import { effectiveDateError } from "@/lib/quality-effective-date";
 import type { DocumentVersion, DocumentVersions, VersionState } from "@/types/quality-document-versions";
 import "./quality-document-versions.css";
@@ -26,6 +27,7 @@ export default function QualityDocumentVersions({ documentId, onClose, onChanged
   const [attempt, setAttempt] = useState(0);
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState<DocumentVersion | null>(null);
+  const [correcting, setCorrecting] = useState<DocumentVersion | null>(null);
   const [effectiveDate, setEffectiveDate] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, startSaving] = useTransition();
@@ -92,6 +94,7 @@ export default function QualityDocumentVersions({ documentId, onClose, onChanged
               {revision.state === "EFFECTIVE" && revision.downloadUrl && <Button size="small" type="primary" href={revision.downloadUrl} download
                 aria-label={`ดาวน์โหลดไฟล์ฉบับ ${revision.version}`} icon={<Download size={15} aria-hidden="true" />} disabled={pending || saving}>ดาวน์โหลดไฟล์</Button>}
               {revision.canReschedule && <Button size="small" icon={<CalendarDays size={15} aria-hidden="true" />} disabled={pending || saving} onClick={() => { setEditing(revision); setEffectiveDate(revision.effectiveDate || ""); setSaveError(null); }}>เปลี่ยนวันที่มีผลใช้</Button>}
+              {revision.canCorrect && <Button size="small" icon={<Pencil size={15} aria-hidden="true" />} disabled={pending || saving} onClick={() => setCorrecting(revision)}>แก้ไขข้อมูลฉบับเดิม</Button>}
             </div>
             <div className="qa-versions-preview-pane">
               <details className="qa-version-metadata" key={`metadata:${revision.id}`}><summary>ข้อมูลเอกสาร · {revision.fileName || "ยังไม่มีไฟล์"}</summary>
@@ -99,7 +102,18 @@ export default function QualityDocumentVersions({ documentId, onClose, onChanged
                 {revision.description && <p className="mt-2 whitespace-pre-wrap break-words text-xs text-muted">{revision.description}</p>}
                 {revision.changeNote && <p className="mt-2 whitespace-pre-wrap break-words text-xs text-muted">สาระที่แก้ไข: {revision.changeNote}</p>}
               </details>
-              {revision.previewUrl ? <QualityDocumentPreview key={`preview:${revision.id}`} url={revision.previewUrl} title={revision.title} /> : <Empty description="เวอร์ชันนี้ยังไม่มีไฟล์สำหรับพรีวิว" />}
+              {!!detail.corrections.filter(item => item.revisionId === revision.id).length && <details className="qa-version-metadata">
+                <summary>ประวัติแก้ไขข้อมูลฉบับเดิม</summary>
+                {detail.corrections.filter(item => item.revisionId === revision.id).map(item => <div key={item.id} className="mt-3 border-t border-line pt-3 text-xs">
+                  <p className="font-medium">{item.actor} · {new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Bangkok" }).format(new Date(item.at))}</p>
+                  <p className="mt-1 whitespace-pre-wrap break-words">เหตุผล: {item.reason}</p>
+                  <p className="mt-1 break-words">ชื่อเดิม: {item.previousTitle}</p>
+                  <p className="mt-1 break-words">ชื่อหลังแก้ไข: {item.title}</p>
+                  <p className="mt-1 break-words">ไฟล์เดิม: {item.previousFileName || "ไม่มี"} · ไฟล์หลังแก้ไข: {item.fileName || "ไม่มี"}</p>
+                  {item.originalFileUrl && <Button className="mt-2" size="small" href={item.originalFileUrl}>เปิดไฟล์ก่อนแก้ไขเพื่อตรวจทาน</Button>}
+                </div>)}
+              </details>}
+              {revision.previewUrl ? <QualityDocumentPreview key={`preview:${revision.id}:${revision.lockVersion}`} url={revision.previewUrl} title={revision.title} /> : <Empty description="เวอร์ชันนี้ยังไม่มีไฟล์สำหรับพรีวิว" />}
             </div>
           </section> : <Empty description="ไม่มีเวอร์ชันเอกสารที่คุณเข้าถึงได้" />}
         </div>
@@ -115,5 +129,8 @@ export default function QualityDocumentVersions({ documentId, onClose, onChanged
       {detail && !validation && effectiveDate <= detail.today && <Alert className="mt-3" type="info" showIcon title="เมื่อบันทึก ฉบับนี้จะมีผลใช้ทันที และฉบับปัจจุบันจะยกเลิกใช้" />}
       {saveError && <Alert className="mt-3" type="error" showIcon title={saveError} action={<Button size="small" disabled={saving} onClick={() => { setEditing(null); setAttempt(value => value + 1); }}>โหลดรายละเอียดใหม่</Button>} />}
     </Modal>
+    {correcting && <QualityDocumentCorrection key={correcting.id} revision={correcting} onClose={() => setCorrecting(null)} onSaved={() => {
+      setCorrecting(null); setAttempt(value => value + 1); onChanged?.();
+    }} />}
   </>;
 }

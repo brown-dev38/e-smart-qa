@@ -23,10 +23,6 @@
   --scrollbar-thumb-hover: #6f9682;
 }
 
-html {
-  scrollbar-gutter: stable;
-}
-
 * {
   box-sizing: border-box;
   scrollbar-width: thin;

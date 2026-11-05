@@ -11,7 +11,7 @@ import QualityDocumentRegistry from "./quality-document-registry";
 
 const states = { DRAFT: { label: "ฉบับร่าง", color: "default" }, PENDING: { label: "รออนุมัติ", color: "gold" }, APPROVED: { label: "อนุมัติแล้ว", color: "green" }, SUPERSEDED: { label: "ถูกแทนที่", color: "default" }, WITHDRAWN: { label: "ยกเลิกใช้", color: "red" } };
 const submissionStates = { PENDING: states.PENDING, RETURNED: { label: "ส่งกลับแก้ไข", color: "orange" }, APPROVED: states.APPROVED };
-const actions: Record<string, string> = { CREATE: "สร้างฉบับร่าง", EDIT: "แก้ไขฉบับร่าง", RESCHEDULE: "เปลี่ยนวันที่มีผลใช้", SUBMIT: "ส่งตรวจ", REVIEW: "ทบทวนผ่าน", RETURN: "ส่งกลับแก้ไข", APPROVE: "อนุมัติ", EFFECTIVE: "มีผลใช้บังคับ", WITHDRAW: "ยกเลิกใช้" };
+const actions: Record<string, string> = { CREATE: "สร้างฉบับร่าง", EDIT: "แก้ไขฉบับร่าง", CORRECT: "แก้ไขข้อมูลฉบับเดิม", RESCHEDULE: "เปลี่ยนวันที่มีผลใช้", SUBMIT: "ส่งตรวจ", REVIEW: "ทบทวนผ่าน", RETURN: "ส่งกลับแก้ไข", APPROVE: "อนุมัติ", EFFECTIVE: "มีผลใช้บังคับ", WITHDRAW: "ยกเลิกใช้" };
 const date = (value: string) => new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Bangkok" }).format(new Date(value));
 const issued = (revision: QualityRevision) => ["APPROVED", "SUPERSEDED", "WITHDRAWN"].includes(revision.status);
 function isReturnedRevision(revision: QualityRevision) {

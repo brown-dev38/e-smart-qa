@@ -5,6 +5,7 @@ import { ActionError, currentActor } from "./current-actor";
 import { workflowId } from "./quality-document-workflow";
 import { qualityToday, refreshQualityPublications } from "./quality-document-publication";
 import { qualityFilePath, revisionFileUrl, verifiedSubmissionBytes } from "./quality-document-files";
+import { correctedRevisionFile, correctionRecord } from "./quality-document-correction-history";
 import type { DocumentPreview, DocumentVersions, VersionState } from "@/types/quality-document-versions";
 
 const issuedStates = new Set(["APPROVED", "SUPERSEDED", "WITHDRAWN"]);
@@ -23,9 +24,21 @@ export async function qualityDocumentVersions(documentId: string, userId: string
   const owner = actor.admin || document.created_by === actor.id;
   if (document.status === "DRAFT" && !owner) throw new ActionError("ไม่มีสิทธิ์ดูเอกสารฉบับร่าง");
   const today = qualityToday();
+  const corrections = owner ? await prisma.audit_logs.findMany({ where: {
+    entity_type: "QUALITY_DOCUMENT", entity_id: String(id), action: "UPDATE", outcome: "SUCCESS",
+    details: { path: "$.kind", equals: "REVISION_CORRECTION" },
+  }, orderBy: { id: "desc" } }) : [];
   const detail: DocumentVersions = {
     id: String(document.id), code: document.document_code, title: document.title,
     currentVersion: document.current_version, deleted: !!document.deleted_at, today,
+    corrections: corrections.flatMap(log => {
+      const record = correctionRecord(log.details);
+      return record ? [{ id: String(log.id), revisionId: record.revisionId, version: record.version,
+        actor: log.actor_name, at: log.created_at.toISOString(), reason: record.reason,
+        previousTitle: record.before.title, title: record.after.title,
+        previousFileName: record.before.file_name, fileName: record.after.file_name,
+        originalFileUrl: record.before.file_path ? `/api/quality-documents/corrections/${log.id}/file` : null }] : [];
+    }),
     versions: document.revisions.filter(revision => owner || issuedStates.has(revision.status)).map(revision => {
       const latest = revision.submissions[0];
       const submitted = revision.status === "PENDING" && latest?.status === "PENDING" ? latest : null;
@@ -48,6 +61,8 @@ export async function qualityDocumentVersions(documentId: string, userId: string
         previewUrl: hasFile ? `/api/quality-documents/revisions/${revision.id}/preview` : null,
         downloadUrl: state === "EFFECTIVE" && document.status === "PUBLISHED" && !document.deleted_at && revision.file_path ? revisionFileUrl(revision.id) : null,
         lockVersion: revision.lock_version,
+        canCorrect: owner && !document.deleted_at && document.status !== "ARCHIVED"
+          && (revision.status === "DRAFT" || revision.status === "APPROVED"),
         canReschedule: owner && !document.deleted_at && document.status !== "ARCHIVED" && document.current_version !== revision.version_label
           && !!revision.effective_date && revision.effective_date.toISOString().slice(0, 10) > today
           && (revision.status === "APPROVED" || (revision.status === "DRAFT" && revision.auto_publish)),
@@ -76,7 +91,9 @@ export async function qualityDocumentPreview(revisionId: string, userId: string,
   if ((revision.document.deleted_at && !actor.admin) || (revision.document.status === "DRAFT" && !owner) || (!issuedStates.has(revision.status) && !owner)) {
     throw new ActionError("ไม่มีสิทธิ์พรีวิวเอกสารเวอร์ชันนี้");
   }
-  const evidence = revision.status !== "DRAFT" ? revision.submissions[0] : undefined;
+  const corrected = await correctedRevisionFile(revision);
+  const evidence = corrected?.file_path && corrected.file_sha256 ? { file_path: corrected.file_path, file_sha256: corrected.file_sha256 }
+    : revision.status !== "DRAFT" ? revision.submissions[0] : undefined;
   const filePath = evidence?.file_path ?? revision.file_path;
   if (!filePath) throw new ActionError("เวอร์ชันนี้ยังไม่มีไฟล์สำหรับพรีวิว");
   const bytes = evidence ? await verifiedSubmissionBytes(evidence) : await readFile(qualityFilePath(filePath));

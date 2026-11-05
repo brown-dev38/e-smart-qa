@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import Image from "next/image";
 import {
   Avatar,
   Badge,
@@ -16,6 +17,7 @@ import {
   Menu,
   Select,
   Tag,
+  Tooltip,
   message,
   type MenuProps,
 } from "antd";
@@ -29,6 +31,8 @@ import {
   FolderOpen,
   LayoutDashboard,
   Menu as MenuIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
   ScrollText,
   X,
 } from "lucide-react";
@@ -272,6 +276,7 @@ function Sidebar({
   role,
   canManage,
   onClose,
+  collapsed = false,
 }: UserInfo & {
   section: Section;
   onNavigate: (section: Section) => void;
@@ -279,24 +284,32 @@ function Sidebar({
   onOpenChange: (keys: string[]) => void;
   canManage: boolean;
   onClose?: () => void;
+  collapsed?: boolean;
 }) {
   return (
-    <div className="qa-sidebar-content">
-      <div className="flex items-center justify-between gap-3 px-6 pb-7 pt-8">
+    <div className={`qa-sidebar-content${collapsed ? " qa-sidebar-content-collapsed" : ""}`}>
+      <div className="qa-brand-header">
         <button
           type="button"
           onClick={() => onNavigate("overview")}
-          className="flex items-center gap-3 rounded-lg text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+          aria-label="e-SMART QA · ภาพรวม Dashboard"
+          className="qa-brand-button rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
         >
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-white/10 text-sm font-bold text-white">
-            QA<span className="text-[#8cdbb8]">.</span>
+          <span className="qa-brand-logo flex h-24 w-24 items-center justify-center">
+            <Image
+              src="/medicine-logo.png"
+              alt="ตราคณะแพทยศาสตร์ มหาวิทยาลัยพะเยา"
+              width={96}
+              height={96}
+              className="h-24 w-24 object-contain"
+            />
           </span>
-          <span>
-            <span className="block text-lg font-semibold tracking-tight text-white">
-              e-SMART QA
+          <span className="qa-brand-institution">
+            <span className="qa-brand-faculty">
+              คณะแพทยศาสตร์
             </span>
-            <span className="block text-[10px] tracking-[0.14em] text-white/55">
-              QUALITY MANAGEMENT
+            <span className="qa-brand-university">
+              มหาวิทยาลัยพะเยา
             </span>
           </span>
         </button>
@@ -306,57 +319,59 @@ function Sidebar({
             onClick={onClose}
             aria-label="ปิดเมนู"
             icon={<X size={20} aria-hidden="true" />}
-            className="qa-sidebar-close"
+            className="qa-sidebar-close absolute right-4 top-4"
           />
         )}
       </div>
 
-      <div className="mx-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3.5">
-        <p className="text-[13px] font-medium text-white/90">คณะแพทยศาสตร์</p>
-        <p className="mt-1 text-xs text-white/55">มหาวิทยาลัยพะเยา</p>
-      </div>
-
       <nav aria-label="เมนูหลัก" className="qa-sidebar-nav">
         <Menu
+          key={collapsed ? "collapsed" : "expanded"}
           theme="dark"
           mode="inline"
+          inlineCollapsed={collapsed}
+          triggerSubMenuAction="hover"
+          subMenuOpenDelay={0.1}
+          subMenuCloseDelay={0.15}
           selectedKeys={[section]}
-          openKeys={openKeys}
-          onOpenChange={onOpenChange}
+          {...(!collapsed ? { openKeys, onOpenChange } : {})}
           inlineIndent={12}
-          expandIcon={
+          expandIcon={collapsed ? undefined : (
             <ChevronDown
               size={14}
               className="qa-menu-chevron"
               aria-hidden="true"
             />
-          }
+          )}
           items={buildNavigationItems(canManage)}
           onClick={({ key }) => onNavigate(key as Section)}
         />
       </nav>
 
-      <div className="border-t border-white/10 p-4">
-        <Button
-          type="text"
-          block
-          onClick={() => onNavigate("account")}
-          aria-current={section === "account" ? "page" : undefined}
-          className="qa-account-button"
-        >
-          <Avatar className="qa-sidebar-avatar" size={36}>
-            {Array.from(name)[0]?.toUpperCase()}
-          </Avatar>
-          <span className="min-w-0 flex-1 text-left">
-            <span className="block truncate text-[13px]">{name}</span>
-            <span className="mt-0.5 block truncate text-[11px] font-normal text-white/55">
-              {role}
+      <div className="qa-sidebar-footer border-t border-white/10 p-4">
+        <Tooltip title={collapsed ? `${name} · ${role}` : undefined} placement="right">
+          <Button
+            type="text"
+            block
+            onClick={() => onNavigate("account")}
+            aria-current={section === "account" ? "page" : undefined}
+            aria-label={`บัญชีผู้ใช้งาน ${name}`}
+            className="qa-account-button"
+          >
+            <Avatar className="qa-sidebar-avatar" size={36}>
+              {Array.from(name)[0]?.toUpperCase()}
+            </Avatar>
+            <span className="qa-sidebar-account-details min-w-0 flex-1 text-left">
+              <span className="block truncate text-[13px]">{name}</span>
+              <span className="mt-0.5 block truncate text-[11px] font-normal text-white/55">
+                {role}
+              </span>
             </span>
-          </span>
-          <ArrowRight size={16} aria-hidden="true" />
-        </Button>
+            {!collapsed && <ArrowRight size={16} aria-hidden="true" />}
+          </Button>
+        </Tooltip>
         <div className="mt-3">
-          <SignOutButton className="qa-sign-out" />
+          <SignOutButton className="qa-sign-out" iconOnly={collapsed} />
         </div>
       </div>
     </div>
@@ -530,6 +545,7 @@ export default function Dashboard({
   const [revisionDocumentId, setRevisionDocumentId] = useState<string | null>(null);
   const { section, openKeys } = navigation;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const focusAfterClose = useRef(false);
   const menuTrigger = useRef<HTMLElement>(null);
@@ -541,6 +557,11 @@ export default function Dashboard({
 
   useEffect(() => {
     setNavigation(readNavigation(storageKey, canManage, departmentDocumentCatalog));
+    try {
+      setSidebarCollapsed(localStorage.getItem(`${storageKey}:collapsed`) === "true");
+    } catch {
+      setSidebarCollapsed(false);
+    }
     setRestoredKey(storageKey);
   }, [storageKey, canManage, departmentDocumentCatalog]);
 
@@ -555,6 +576,16 @@ export default function Dashboard({
 
   function changeOpenKeys(keys: string[]) {
     rememberNavigation({ ...navigation, openKeys: keys });
+  }
+
+  function toggleSidebar() {
+    const next = !sidebarCollapsed;
+    setSidebarCollapsed(next);
+    try {
+      localStorage.setItem(`${storageKey}:collapsed`, String(next));
+    } catch {
+      // Collapsing still works when browser storage is unavailable.
+    }
   }
 
   useEffect(() => {
@@ -616,11 +647,18 @@ export default function Dashboard({
   }
 
   return (
-    <Layout hasSider className="qa-dashboard">
+    <Layout hasSider className={`qa-dashboard${sidebarCollapsed ? " qa-dashboard-collapsed" : ""}`}>
       <a href="#dashboard-content" className="qa-skip-link">
         ข้ามไปยังเนื้อหา
       </a>
-      <Layout.Sider width={272} className="qa-sidebar">
+      <Layout.Sider
+        id="desktop-sidebar"
+        width={272}
+        collapsedWidth={80}
+        collapsed={sidebarCollapsed}
+        trigger={null}
+        className="qa-sidebar"
+      >
         <Sidebar
           section={section}
           onNavigate={navigate}
@@ -629,6 +667,7 @@ export default function Dashboard({
           name={name}
           role={role}
           canManage={canManage}
+          collapsed={sidebarCollapsed}
         />
       </Layout.Sider>
       <Drawer
@@ -661,8 +700,17 @@ export default function Dashboard({
       </Drawer>
 
       <Layout className="qa-workspace">
-        <header className="flex min-h-20 items-center justify-between gap-4 border-b border-line/70 bg-paper px-5 sm:px-8 lg:px-10">
+        <header className="qa-header flex min-h-20 items-center justify-between gap-4 border-b border-line/70 bg-paper px-5 sm:px-8 lg:px-10">
           <div className="flex min-w-0 flex-1 items-center gap-3 py-4">
+            <Button
+              onClick={toggleSidebar}
+              aria-label={sidebarCollapsed ? "ขยาย Sidebar" : "ยุบ Sidebar"}
+              aria-controls="desktop-sidebar"
+              aria-expanded={!sidebarCollapsed}
+              title={sidebarCollapsed ? "ขยาย Sidebar" : "ยุบ Sidebar"}
+              icon={sidebarCollapsed ? <PanelLeftOpen size={20} aria-hidden="true" /> : <PanelLeftClose size={20} aria-hidden="true" />}
+              className="qa-desktop-menu-button"
+            />
             <Button
               onClick={(event) => {
                 menuTrigger.current = event.currentTarget;
@@ -675,19 +723,16 @@ export default function Dashboard({
               icon={<MenuIcon size={20} aria-hidden="true" />}
               className="qa-mobile-menu-button"
             />
-            <Breadcrumb
-              className="qa-breadcrumb"
-              items={[
-                {
-                  title: (
-                    <span className="qa-breadcrumb-parent">พื้นที่ทำงาน</span>
-                  ),
-                },
-                ...(selectedPage ? selectedPage.path : [title]).map(
+            <div className="qa-header-location">
+              <span className="qa-header-project">e-SMART QA</span>
+              <Breadcrumb
+                aria-label="ตำแหน่งหน้าปัจจุบัน"
+                className="qa-breadcrumb"
+                items={(selectedPage ? selectedPage.path : [title]).map(
                   (label) => ({ title: label }),
-                ),
-              ]}
-            />
+                )}
+              />
+            </div>
           </div>
           <Button
             type="text"
@@ -861,7 +906,7 @@ export default function Dashboard({
 
           <footer className="mt-auto flex flex-wrap justify-between gap-2 border-t border-line/80 pt-5 text-[10px] text-muted">
             <span>e-SMART QA · ระบบบริหารคุณภาพการศึกษา</span>
-            <span>คณะแพทยศาสตร์ มหาวิทยาลัยพะเยา</span>
+            <span>© 2026 คณะแพทยศาสตร์ มหาวิทยาลัยพะเยา</span>
           </footer>
         </main>
       </Layout>

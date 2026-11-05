@@ -1,5 +1,6 @@
 import type { Prisma, docs_qa_documents, docs_qa_document_revisions } from "@prisma/client";
 import { prisma } from "./prisma";
+import { correctedRevisionFile } from "./quality-document-correction-history";
 import { ActionError as WorkflowError, currentActor as qualityActor } from "./current-actor";
 import { writeAudit } from "./audit-log";
 export { ActionError as WorkflowError, currentActor as qualityActor } from "./current-actor";
@@ -328,6 +329,8 @@ export async function qualityRevisionFile(revisionId: string, userId: string, pu
     if (!manages(actor, revision.document.created_by)) fail("ไม่มีสิทธิ์เปิดไฟล์เพื่อตรวจทาน");
   } else if (revision.document.deleted_at || revision.status !== "APPROVED" || revision.document.status !== "PUBLISHED" || revision.document.current_version !== revision.version_label) fail("ดาวน์โหลดเพื่อใช้งานได้เฉพาะฉบับอนุมัติที่มีผลใช้ปัจจุบัน");
   if (revision.document.deleted_at && !actor.admin) fail("เอกสารนี้ถูกลบแล้ว");
+  const corrected = await correctedRevisionFile(revision);
+  if (corrected?.file_path && corrected.file_sha256) return { path: corrected.file_path, name: corrected.file_name || "document", hash: corrected.file_sha256, evidence: true };
   const evidence = revision.submissions[0];
   if (evidence && revision.status !== "DRAFT") return { path: evidence.file_path, name: evidence.file_name, hash: evidence.file_sha256, evidence: true };
   return { path: revision.file_path, name: revision.file_name || "document", hash: null, evidence: false };
@@ -338,7 +341,7 @@ export async function qualitySubmissionFile(submissionId: string, userId: string
   await refreshQualityPublications();
   const submission = await prisma.docs_qa_submissions.findUnique({
     where: { id: workflowId(submissionId) },
-    include: { revision: { select: { status: true, version_label: true, document: { select: { created_by: true, deleted_at: true, status: true, current_version: true } } } } },
+    include: { revision: { select: { id: true, document_id: true, file_path: true, status: true, version_label: true, document: { select: { created_by: true, deleted_at: true, status: true, current_version: true } } } } },
   });
   if (!submission) fail("ไม่พบสำเนาส่งตรวจ");
   const doc = submission.revision.document;
@@ -346,6 +349,7 @@ export async function qualitySubmissionFile(submissionId: string, userId: string
   if (purpose !== "review" && (doc.deleted_at || submission.status !== "APPROVED" || submission.revision.status !== "APPROVED" || doc.status !== "PUBLISHED" || doc.current_version !== submission.revision.version_label)) {
     fail("ดาวน์โหลดเพื่อใช้งานได้เฉพาะฉบับที่อนุมัติแล้ว");
   }
+  if (purpose !== "review" && await correctedRevisionFile(submission.revision)) fail("สำเนานี้เป็นข้อมูลก่อนแก้ไข กรุณาดาวน์โหลดไฟล์ฉบับปัจจุบัน");
   return { path: submission.file_path, name: submission.file_name, hash: submission.file_sha256 };
 }
 
