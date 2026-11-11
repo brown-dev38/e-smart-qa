@@ -5,6 +5,7 @@ import { Alert, Button, Empty, Input, Modal, Select, Tag } from "antd";
 import { CalendarDays, Download, Pencil } from "lucide-react";
 import toast from "react-hot-toast";
 import { qualityDocumentVersionsAction, rescheduleQualityRevisionAction } from "./documents/version-actions";
+import { withdrawQualityDocumentAction } from "./documents/approval-actions";
 import QualityDocumentPreview from "./quality-document-preview";
 import QualityDocumentCorrection from "./quality-document-correction";
 import { effectiveDateError } from "@/lib/quality-effective-date";
@@ -31,6 +32,9 @@ export default function QualityDocumentVersions({ documentId, onClose, onChanged
   const [effectiveDate, setEffectiveDate] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, startSaving] = useTransition();
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawReason, setWithdrawReason] = useState("");
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     startTransition(async () => {
@@ -46,6 +50,22 @@ export default function QualityDocumentVersions({ documentId, onClose, onChanged
   const revision = detail?.versions.find(item => item.id === selected)
     ?? detail?.versions.find(item => item.state === "EFFECTIVE") ?? detail?.versions[0];
   const validation = editing ? effectiveDateError(effectiveDate) : null;
+  function withdraw() {
+    if (!detail?.canWithdraw || !withdrawReason.trim() || pending || saving) return;
+    startSaving(async () => {
+      setWithdrawError(null);
+      try {
+        const result = await withdrawQualityDocumentAction({ documentId: detail.id, lockVersion: detail.registryVersion, reason: withdrawReason.trim() });
+        if (!result.ok) { setWithdrawError(result.error); return; }
+        setWithdrawing(false);
+        // Remove download and edit controls immediately while fresh details load.
+        setDetail(null);
+        setAttempt(value => value + 1);
+        onChanged?.();
+        toast.success("ยกเลิกใช้เอกสารแล้ว");
+      } catch { setWithdrawError("ยกเลิกใช้ไม่สำเร็จ กรุณาลองใหม่"); }
+    });
+  }
   function saveDate() {
     if (!editing || validation) return;
     startSaving(async () => {
@@ -67,12 +87,16 @@ export default function QualityDocumentVersions({ documentId, onClose, onChanged
   ] : [];
   return <>
     <Modal title="รายละเอียดเอกสาร" className="qa-versions-modal" open onCancel={onClose} width={1180} style={{ top: 16 }}
-      footer={<Button onClick={onClose} disabled={saving}>ปิด</Button>} closable={!saving} mask={{ closable: !saving }} loading={!detail && pending}
+      footer={<>
+        {detail?.canWithdraw && <Button danger disabled={pending || saving || !!editing || !!correcting} onClick={() => { setWithdrawReason(""); setWithdrawError(null); setWithdrawing(true); }}>ยกเลิกใช้เอกสาร</Button>}
+        <Button onClick={onClose} disabled={saving}>ปิด</Button>
+      </>} closable={!saving} mask={{ closable: !saving }} loading={!detail && pending}
       styles={{ container: { display: "flex", flexDirection: "column", height: "min(820px, calc(100dvh - 32px))", padding: 0, overflow: "hidden" }, header: { padding: "14px 20px 10px", margin: 0 }, body: { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }, footer: { margin: 0, padding: "10px 20px", borderTop: "1px solid var(--color-line)" } }}>
       {error && <Alert type="error" showIcon className="mx-4 mb-2" title={error} action={<Button onClick={() => setAttempt(value => value + 1)}>ลองใหม่</Button>} />}
       {detail && <>
         <div className="qa-versions-heading"><p className="break-all font-mono text-xs text-muted">{detail.code}</p><h2 className="mt-1 text-sm font-medium" title={detail.title}>{detail.title}</h2></div>
         {detail.deleted && <Alert className="mx-4 mb-2" type="warning" showIcon title="เอกสารนี้ถูกนำออกจากรายการใช้งานแล้ว" />}
+        {detail.archived && <Alert className="mx-4 mb-2" type="warning" showIcon title="ยกเลิกใช้เอกสารแล้ว" description="เก็บฉบับและประวัติไว้ตรวจสอบย้อนหลัง ไม่สามารถดาวน์โหลดเพื่อใช้งานได้" />}
         <div className="qa-versions-layout" aria-busy={pending}>
           <nav className="qa-versions-sidebar" aria-label="เวอร์ชันเอกสาร">
             {groups.filter(group => group.versions.length).map(group => <div className="qa-versions-group" key={group.title}>
@@ -118,6 +142,15 @@ export default function QualityDocumentVersions({ documentId, onClose, onChanged
           </section> : <Empty description="ไม่มีเวอร์ชันเอกสารที่คุณเข้าถึงได้" />}
         </div>
       </>}
+    </Modal>
+    <Modal title="ยืนยันยกเลิกใช้เอกสาร" open={withdrawing} onCancel={() => { if (!saving) setWithdrawing(false); }}
+      onOk={withdraw} okText="ยกเลิกใช้เอกสาร" cancelText="กลับ" confirmLoading={saving} closable={!saving} mask={{ closable: false }}
+      okButtonProps={{ danger: true, disabled: pending || !detail?.canWithdraw || !withdrawReason.trim() }} cancelButtonProps={{ disabled: saving }}>
+      <p className="mb-3 break-all">รหัสเอกสาร: {detail?.code}</p>
+      <Alert type="warning" showIcon title="ยกเลิกใช้เอกสารทั้งชุด" description="ฉบับอนุมัติที่ยังใช้งานและฉบับอนุมัติที่รอวันมีผลจะถูกยกเลิก ดาวน์โหลดเพื่อใช้งานไม่ได้ ระบบเก็บไฟล์และประวัติไว้ และยังไม่รองรับการเปิดกลับมาใช้งาน" />
+      <label htmlFor="versions-withdraw-reason" className="mb-2 mt-4 block text-sm">เหตุผลการยกเลิกใช้ *</label>
+      <Input.TextArea id="versions-withdraw-reason" value={withdrawReason} maxLength={2000} disabled={saving} autoSize={{ minRows: 3, maxRows: 5 }} onChange={event => setWithdrawReason(event.target.value)} />
+      {withdrawError && <Alert className="mt-3" type="error" showIcon title={withdrawError} action={<Button size="small" disabled={saving} onClick={() => { setWithdrawing(false); setAttempt(value => value + 1); }}>โหลดรายละเอียดใหม่</Button>} />}
     </Modal>
     <Modal title={`เปลี่ยนวันที่มีผลใช้ · ${editing ? label(editing) : ""}`} open={!!editing} destroyOnHidden onCancel={() => { if (!saving) setEditing(null); }}
       onOk={saveDate} okText="บันทึกวันที่" cancelText="ยกเลิก" confirmLoading={saving} cancelButtonProps={{ disabled: saving }} closable={!saving} mask={{ closable: false }}

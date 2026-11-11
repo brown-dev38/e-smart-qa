@@ -31,6 +31,9 @@ export async function qualityDocumentVersions(documentId: string, userId: string
   const detail: DocumentVersions = {
     id: String(document.id), code: document.document_code, title: document.title,
     currentVersion: document.current_version, deleted: !!document.deleted_at, today,
+    archived: document.status === "ARCHIVED", registryVersion: document.registry_version,
+    canWithdraw: actor.admin && !document.deleted_at && document.status !== "ARCHIVED"
+      && document.revisions.some(revision => revision.status === "APPROVED"),
     corrections: corrections.flatMap(log => {
       const record = correctionRecord(log.details);
       return record ? [{ id: String(log.id), revisionId: record.revisionId, version: record.version,

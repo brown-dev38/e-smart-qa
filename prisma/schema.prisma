@@ -195,6 +195,7 @@ model docs_qa_documents {
   program_id           Int                     @db.UnsignedInt
   document_level_id    Int                     @db.UnsignedInt
   criterion_id         Int?                    @db.UnsignedInt
+  course_id            Int?                    @db.UnsignedInt
   current_version      String?                 @db.VarChar(20)
   approved_revision_no Int?                    @db.UnsignedSmallInt
   storage_location     String?                 @db.VarChar(1000)
@@ -219,6 +220,7 @@ model docs_qa_documents {
   program        docs_programs                @relation(fields: [program_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
   document_level docs_document_levels         @relation(fields: [document_level_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
   criterion      docs_qa_criteria?            @relation(fields: [criterion_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  course         docs_courses?                @relation(fields: [course_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
   revisions      docs_qa_document_revisions[]
   registry_changes docs_qa_registry_changes[]
 
@@ -226,6 +228,7 @@ model docs_qa_documents {
   @@index([program_id])
   @@index([document_level_id])
   @@index([criterion_id])
+  @@index([course_id])
   @@index([status])
   @@index([deleted_at])
 }
@@ -428,6 +431,7 @@ model docs_courses {
   is_active  Boolean                 @default(true)
   program    docs_programs           @relation(fields: [program_id], references: [id], onDelete: Restrict)
   offerings  docs_course_offerings[]
+  quality_documents docs_qa_documents[]
 
   @@unique([program_id, code])
 }

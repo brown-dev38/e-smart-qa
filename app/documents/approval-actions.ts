@@ -5,6 +5,7 @@ import { createQualityRevision, qualityApprovalQueue, qualityReviewInbox, qualit
 import type { RevisionCommand } from "@/types/quality-document";
 import type { QualityRegistryCommand } from "@/types/quality-document";
 import { updateQualityRegistry, withdrawQualityDocument } from "@/lib/quality-document-registry";
+import { revalidatePath } from "next/cache";
 
 async function identity() {
   const session = await auth();
@@ -49,6 +50,10 @@ export async function updateQualityRegistryAction(command: QualityRegistryComman
 }
 
 export async function withdrawQualityDocumentAction(command: { documentId: string; lockVersion: number; reason: string }) {
-  try { return await withdrawQualityDocument(command, await identity()); }
+  try {
+    const result = await withdrawQualityDocument(command, await identity());
+    if (result.ok) revalidatePath("/");
+    return result;
+  }
   catch (error) { return errorResult(error); }
 }

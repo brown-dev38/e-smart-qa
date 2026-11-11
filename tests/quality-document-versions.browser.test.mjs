@@ -213,7 +213,7 @@ test("version previews and effective-date forms work on desktop and mobile", {
     await checkPageSelection();
     await checkZoom(".qa-preview-pdf");
     await writeFile(".next/qa-versions-mobile.png", Buffer.from((await rpc("Page.captureScreenshot", { format: "png" })).data, "base64"));
-    await click("document.querySelector('.ant-modal-footer button')");
+    await click("Array.from(document.querySelectorAll('.qa-versions-modal .ant-modal-footer button')).find(button=>button.textContent.trim()==='ปิด')");
     await until("!document.querySelector('.qa-versions-modal')");
     await rpc("Emulation.setDeviceMetricsOverride", { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
     await evaluate(`localStorage.setItem(${JSON.stringify(`e-smart-qa:document-draft:v2:${user.id}`)},JSON.stringify({values:{documentMode:'new',title:'Previously saved draft',description:''},hadAttachment:false}))`);
@@ -260,7 +260,7 @@ test("version previews and effective-date forms work on desktop and mobile", {
     assert.equal((await prisma.docs_qa_documents.findUniqueOrThrow({ where: { id: document.id } })).current_version, "004");
     assert.ok(await evaluate("document.querySelector('.qa-versions-toolbar a[download]')?.getAttribute('aria-label').includes('004')"), "newly effective versions can be downloaded on mobile");
     assert.ok(!await evaluate("document.querySelector('.qa-versions-toolbar')?.textContent.includes('เปลี่ยนวันที่มีผลใช้')"));
-    await click("document.querySelector('.qa-versions-modal .ant-modal-footer button')");
+    await click("Array.from(document.querySelectorAll('.qa-versions-modal .ant-modal-footer button')).find(button=>button.textContent.trim()==='ปิด')");
     await until("!document.querySelector('.qa-versions-modal')");
     await rpc("Emulation.setDeviceMetricsOverride", { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
     await until("window.innerWidth===1280 && !document.querySelector('.ant-modal-wrap')");
@@ -270,11 +270,11 @@ test("version previews and effective-date forms work on desktop and mobile", {
     assert.ok(await evaluate("document.querySelector('label[for=\"quality-document_job\"]').textContent.includes('ไม่บังคับ')"));
     await select("quality-document_curriculum", marker);
     await select("quality-document_level", "(SP)");
-    await until(`document.getElementById('document-code-preview')?.textContent===${JSON.stringify(`${marker}-${marker}-SP-XXX`)}`);
+    await until(`document.getElementById('document-code-preview')?.textContent===${JSON.stringify(`${marker}-${marker}-SP-001`)}`);
     await select("quality-document_job", "(QA)");
-    await until(`document.getElementById('document-code-preview')?.textContent===${JSON.stringify(`${marker}-QA-${marker}-SP-XXX`)}`);
+    await until(`document.getElementById('document-code-preview')?.textContent===${JSON.stringify(`${marker}-QA-${marker}-SP-001`)}`);
     await click("document.querySelector('button[aria-label=\"ล้างชื่องาน\"]')");
-    await until(`document.getElementById('document-code-preview')?.textContent===${JSON.stringify(`${marker}-${marker}-SP-XXX`)}`);
+    await until(`document.getElementById('document-code-preview')?.textContent===${JSON.stringify(`${marker}-${marker}-SP-001`)}`);
     await input("quality-document_title", `${marker} new`);
     await input("quality-document_effectiveDate", future);
     await attach();

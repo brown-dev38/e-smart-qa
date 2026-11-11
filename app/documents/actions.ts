@@ -6,6 +6,8 @@ import { saveQualityDocument } from "@/lib/quality-document-save";
 import { qualityActor } from "@/lib/quality-document-workflow";
 import { qualityRevisionTargets } from "@/lib/quality-document-schedule";
 import { revalidatePath } from "next/cache";
+import { previewQualityDocumentNumber } from "@/lib/quality-document-number";
+import { ActionError } from "@/lib/current-actor";
 import type {
   DocumentSaveResult,
   QualityDocumentListResult,
@@ -34,6 +36,16 @@ export async function listQualityRevisionTargetsAction() {
   if (!session?.user?.id) return { ok: false as const, error: "กรุณาเข้าสู่ระบบก่อนเพิ่มเวอร์ชัน" };
   try { return { ok: true as const, documents: await qualityRevisionTargets(session.user.id) }; }
   catch { return { ok: false as const, error: "โหลดรายการเอกสารเดิมไม่สำเร็จ กรุณาลองใหม่" }; }
+}
+
+export async function previewQualityDocumentNumberAction(form: FormData) {
+  const session = await auth();
+  if (!session?.user?.id) return { ok: false as const, error: "กรุณาเข้าสู่ระบบก่อนดูรหัสเอกสาร" };
+  try { return { ok: true as const, ...await previewQualityDocumentNumber(form, session.user.id) }; }
+  catch (error) {
+    if (!(error instanceof ActionError)) console.error("[quality-document-number] Preview failed", error);
+    return { ok: false as const, error: error instanceof ActionError ? error.message : "โหลดลำดับเอกสารไม่สำเร็จ กรุณาลองใหม่" };
+  }
 }
 
 export async function listQualityDocumentsAction(

@@ -3,18 +3,11 @@ import { storeQualityFile, removeQualityFile } from "./quality-document-files";
 import { qualityActor } from "./quality-document-workflow";
 import { writeAudit } from "./audit-log";
 import type { DocumentSaveResult } from "@/types/quality-document";
-import { supportsDocumentCriterion } from "./quality-document-catalog";
+import { documentField as field, resolveQualityDocumentGroup, nextQualityDocumentNumber } from "./quality-document-number";
 import { effectiveDateError } from "./quality-effective-date";
 import { activateQualityPublication } from "./quality-document-publication";
 import { saveScheduledQualityRevision } from "./quality-document-schedule";
 import { ActionError } from "./current-actor";
-
-function field(formData: FormData, name: string): string {
-  const value = formData.get(name);
-  return typeof value === "string" ? value.trim() : "";
-}
-
-class SequenceExhausted extends Error {}
 
 export async function saveQualityDocument(
   formData: FormData,
@@ -27,17 +20,9 @@ export async function saveQualityDocument(
     const error = effectiveDateError(effectiveDate);
     if (error) return { ok: false, error };
   }
-  const departmentCode = field(formData, "department").toUpperCase();
-  const jobCode = field(formData, "job").toUpperCase();
-  const programCode = field(formData, "program").toUpperCase();
-  const levelCode = field(formData, "level").toUpperCase();
-  const criterionCode = supportsDocumentCriterion(levelCode) ? field(formData, "criterion").toUpperCase() : "";
   const title = field(formData, "title");
   const description = field(formData, "description");
 
-  if (!departmentCode || !programCode || !levelCode) {
-    return { ok: false, error: "ข้อมูลสำหรับออกรหัสเอกสารไม่ครบถ้วน" };
-  }
   if (!title) {
     return { ok: false, error: "กรุณาระบุชื่อเอกสาร" };
   }
@@ -47,67 +32,11 @@ export async function saveQualityDocument(
   if (description.length > 2000) {
     return { ok: false, error: "คำอธิบายต้องไม่เกิน 2,000 ตัวอักษร" };
   }
-  const [department, program, level] = await Promise.all([
-    prisma.docs_departments.findUnique({ where: { code: departmentCode } }),
-    prisma.docs_programs.findUnique({ where: { code: programCode } }),
-    prisma.docs_document_levels.findUnique({ where: { code: levelCode } }),
-  ]);
-
-  if (!department || !department.is_active) {
-    return { ok: false, error: "ไม่พบหน่วยงานหลักที่เลือก หรือถูกปิดใช้งานแล้ว" };
-  }
-  if (!program || !program.is_active) {
-    return { ok: false, error: "ไม่พบหลักสูตรที่เลือก หรือถูกปิดใช้งานแล้ว" };
-  }
-  if (!level || !level.is_active) {
-    return { ok: false, error: "ไม่พบระดับเอกสารที่เลือก หรือถูกปิดใช้งานแล้ว" };
-  }
-
-  let subDepartment = null;
-  if (jobCode) {
-    if (!department.has_sub_department) return { ok: false, error: "หน่วยงานที่เลือกไม่มีงานย่อย" };
-    subDepartment = await prisma.docs_sub_departments.findUnique({
-      where: {
-        department_id_code: {
-          department_id: department.id,
-          code: jobCode,
-        },
-      },
-    });
-    if (!subDepartment || !subDepartment.is_active) {
-      return { ok: false, error: "ไม่พบงานย่อยที่เลือก หรือถูกปิดใช้งานแล้ว" };
-    }
-  }
-
-  const criterion = criterionCode ? await prisma.docs_qa_criteria.findUnique({
-    where: {
-      framework_id_code: {
-        framework_id: program.framework_id,
-        code: criterionCode,
-      },
-    },
-  }) : null;
-  if (criterionCode && (!criterion || !criterion.is_active)) {
-    return { ok: false, error: "ไม่พบเกณฑ์ที่เลือก หรือถูกปิดใช้งานแล้ว" };
-  }
-  if (criterion && !criterion.is_selectable) {
-    return {
-      ok: false,
-      error: "เกณฑ์ที่เลือกเป็นเพียงหัวข้อกลุ่ม ไม่สามารถผูกเอกสารได้",
-    };
-  }
-
-  const codePrefix = [
-    department.code,
-    ...(subDepartment ? [subDepartment.code] : []),
-    program.code,
-    level.code,
-    ...(criterion ? [criterion.code] : []),
-  ].join("-");
-
   let fileData: Awaited<ReturnType<typeof storeQualityFile>> = null;
   let saved: { documentCode: string; documentId: string; status: "DRAFT" | "PUBLISHED" | "ARCHIVED" };
   try {
+    const group = await resolveQualityDocumentGroup(formData);
+    const { department, subDepartment, program, level, criterion, course } = group;
     fileData = await storeQualityFile(formData.get("file"));
     if (effectiveDate && !fileData) throw new ActionError("กรุณาแนบไฟล์เอกสารสำหรับวันที่มีผลใช้บังคับที่กำหนด");
     saved = await prisma.$transaction(async tx => {
@@ -115,36 +44,9 @@ export async function saveQualityDocument(
       // Read Committed ensures a waiting request sees the previous allocation.
       await tx.$queryRaw`SELECT id FROM docs_departments WHERE id = ${department.id} FOR UPDATE`;
       const actor = await qualityActor(userId, tx);
-      const existing = await tx.docs_qa_documents.findMany({
-        where: { OR: [
-          {
-            department_id: department.id,
-            sub_department_id: subDepartment?.id ?? null,
-            program_id: program.id,
-            document_level_id: level.id,
-            criterion_id: criterion?.id ?? null,
-          },
-          { document_code: { startsWith: `${codePrefix}-` } },
-        ] },
-        select: {
-          sequence_no: true, document_code: true, department_id: true,
-          sub_department_id: true, program_id: true, document_level_id: true, criterion_id: true,
-        },
-      });
-      let highest = 0;
-      for (const row of existing) {
-        const suffix = row.document_code.startsWith(`${codePrefix}-`)
-          ? row.document_code.slice(codePrefix.length + 1) : "";
-        const sameGroup = row.department_id === department.id &&
-          row.sub_department_id === (subDepartment?.id ?? null) &&
-          row.program_id === program.id && row.document_level_id === level.id && row.criterion_id === (criterion?.id ?? null);
-        for (const value of [sameGroup ? row.sequence_no : null, suffix]) {
-          if (value && /^\d{1,10}$/.test(value)) highest = Math.max(highest, Number(value));
-        }
-      }
-      if (highest >= 999) throw new SequenceExhausted("ลำดับเอกสารในกลุ่มนี้ครบ 999 แล้ว กรุณาติดต่อผู้ดูแลระบบ");
-      const sequence = String(highest + 1).padStart(3, "0");
-      const allocatedCode = `${codePrefix}-${sequence}`;
+      const { sequence, documentCode: allocatedCode } = await nextQualityDocumentNumber(group, tx);
+      const expectedCode = field(formData, "expectedDocumentCode");
+      if (expectedCode && expectedCode !== allocatedCode) throw new ActionError("ลำดับเอกสารเปลี่ยนแล้ว กรุณาตรวจสอบรหัสใหม่ก่อนบันทึก");
       const created = await tx.docs_qa_documents.create({
         data: {
           document_code: allocatedCode,
@@ -156,6 +58,7 @@ export async function saveQualityDocument(
           program_id: program.id,
           document_level_id: level.id,
           criterion_id: criterion?.id ?? null,
+          course_id: course?.id ?? null,
           current_version: null,
           status: "DRAFT",
           created_by: userId,
@@ -177,7 +80,7 @@ export async function saveQualityDocument(
     }, { isolationLevel: "ReadCommitted" });
   } catch (error) {
     if (fileData) await removeQualityFile(fileData.file_path);
-    if (error instanceof SequenceExhausted || error instanceof ActionError) return { ok: false, error: error.message };
+    if (error instanceof ActionError) return { ok: false, error: error.message };
     if ((error as { code?: string }).code === "P2002") {
       return {
         ok: false,

@@ -24,6 +24,7 @@ export async function qualityRevisionTargets(userId: string): Promise<QualityRev
     id: String(document.id), code: document.document_code, title: document.title, description: document.description || "",
     currentVersion: document.current_version!, department: document.department.code, job: document.sub_department?.code,
     curriculum: document.program.code, level: document.document_level.code, criterion: document.criterion?.code,
+    courseId: document.course_id ? String(document.course_id) : undefined,
   }));
 }
 

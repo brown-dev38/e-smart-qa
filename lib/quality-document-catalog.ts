@@ -7,6 +7,7 @@ export type DocumentFormValues = {
   effectiveDate?: string;
   department?: string;
   job?: string;
+  courseId?: string;
   curriculum?: string;
   level?: string;
   criterion?: string;
@@ -39,6 +40,7 @@ export type DocumentCatalog = {
   levels: CatalogOption[];
   criteria: Record<string, CriterionGroup[]>;
   criterionCodes: Record<string, string[]>;
+  courses: { value: string; label: string; code: string; program: string }[];
 };
 
 const LEGACY_PROGRAM_CODES: Record<string, string> = {
@@ -150,6 +152,11 @@ export function buildDocumentCatalog(data: MasterData): DocumentCatalog {
     levels,
     criteria,
     criterionCodes,
+    courses: (data.courses ?? []).filter(item => item.is_active).flatMap(item => {
+      const program = data.programs.find(program => program.id === item.program_id);
+      return program && programs.some(option => option.value === program.code)
+        ? [{ value: String(item.id), label: `${item.code} — ${item.name_th}`, code: item.code, program: program.code }] : [];
+    }),
   };
 }
 
@@ -207,10 +214,13 @@ export function buildDocumentPrefix(
     if (!jobs.some((item) => item.value === values.job)) return null;
   }
 
+  const course = values.courseId ? catalog.courses?.find(item => item.value === values.courseId && item.program === program.value) : null;
+  if (values.courseId && (!department.hasSubDepartment || values.job !== "TCH" || !course)) return null;
+
   return [
     department.value,
     ...(department.hasSubDepartment && values.job ? [values.job] : []),
-    program.value,
+    course ? course.code : program.value,
     level.value,
     ...(supportsDocumentCriterion(level.value) && criterion ? [criterion] : []),
   ].join("-");
@@ -264,6 +274,7 @@ export function readDocumentDraft(
         effectiveDate: isQualityCalendarDate(values.effectiveDate) ? values.effectiveDate : undefined,
         department: department?.value,
         job,
+        courseId: job === "TCH" && program ? catalog.courses?.find(item => item.value === values.courseId && item.program === program.value)?.value : undefined,
         curriculum: program?.value,
         level: level?.value,
         criterion:

@@ -18,13 +18,26 @@ const catalog = {
     { value: "MGT", label: "บริหาร", hasSubDepartment: false },
     { value: "EDU", label: "การศึกษา", hasSubDepartment: true },
   ],
-  subDepartments: { EDU: [{ value: "QA", label: "ประกันคุณภาพ" }] },
+  subDepartments: { EDU: [{ value: "QA", label: "ประกันคุณภาพ" }, { value: "TCH", label: "การสอน" }] },
+  courses: [{ value: "1", code: "321323", label: "321323 — รายวิชา", program: "M.D." }],
   programs: [{ value: "M.D.", label: "แพทยศาสตร์", name: "แพทยศาสตร์", framework: "WFME" }],
   levels: [{ value: "SP", label: "ระเบียบปฏิบัติ" }, { value: "WI", label: "วิธีปฏิบัติงาน" }],
   criteria: {},
   criterionCodes: { WFME: ["W1.1.1"] },
 };
 const values = { department: "MGT", curriculum: "M.D.", level: "SP", title: "เอกสาร", description: "" };
+
+test("TCH course codes are included only for a valid course in the selected program", () => {
+  const teaching = { ...values, department: "EDU", job: "TCH", courseId: "1" };
+  assert.equal(buildDocumentPrefix(teaching, catalog), "EDU-TCH-321323-SP");
+  assert.equal(buildDocumentPrefix({ ...teaching, courseId: undefined }, catalog), "EDU-TCH-M.D.-SP");
+  assert.equal(buildDocumentPrefix({ ...teaching, job: "QA" }, catalog), null);
+  assert.equal(buildDocumentPrefix({ ...teaching, courseId: "999" }, catalog), null);
+  const restored = readDocumentDraft(JSON.stringify({ values: teaching }), catalog);
+  assert.equal(restored.values.courseId, "1");
+  const invalid = readDocumentDraft(JSON.stringify({ values: { ...teaching, job: "QA" } }), catalog);
+  assert.equal(invalid.values.courseId, undefined);
+});
 
 test("SP codes omit the criterion, including a selection left over from another level", () => {
   assert.equal(buildDocumentPrefix(values, catalog), "MGT-M.D.-SP");

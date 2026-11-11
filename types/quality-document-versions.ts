@@ -7,6 +7,7 @@ export type DocumentVersion = {
 };
 export type DocumentVersions = {
   id: string; code: string; title: string; currentVersion: string | null; deleted: boolean;
+  archived: boolean; canWithdraw: boolean; registryVersion: number;
   versions: DocumentVersion[];
   today: string;
   corrections: { id: string; revisionId: string; version: string; actor: string; at: string;

@@ -6,11 +6,29 @@ import { Copy, Eye, FileText, Info, Paperclip, RotateCcw, Save, Trash2, UploadCl
 import toast from "react-hot-toast";
 import { buildDocumentPrefix, EMPTY_DOCUMENT, isValidCriterion, readDocumentDraft, supportsDocumentCriterion, type DocumentCatalog, type DocumentFormValues } from "@/lib/quality-document-catalog";
 import { documentDraftKey } from "@/lib/quality-document-draft";
-import { listQualityRevisionTargetsAction, saveQualityDocumentAction } from "./documents/actions";
+import { listQualityRevisionTargetsAction, previewQualityDocumentNumberAction, saveQualityDocumentAction } from "./documents/actions";
 import QualityDocumentVersions from "./quality-document-versions";
 import { effectiveDateError, qualityToday } from "@/lib/quality-effective-date";
 import type { QualityRevisionTarget } from "@/types/quality-document-schedule";
 import "./quality-document-form.css";
+
+function TeachingScopeSelect({ catalog, value, courseId, onChange, id, disabled }: {
+  catalog: DocumentCatalog; value?: string; courseId?: string; id?: string; disabled?: boolean;
+  onChange?: (program: string, courseId?: string) => void;
+}) {
+  return <Select id={id} disabled={disabled} showSearch optionFilterProp="label" placeholder="เลือกหลักสูตร หรือค้นหารหัสวิชา เช่น 321323"
+    value={courseId ? `course:${courseId}` : value ? `program:${value}` : undefined}
+    options={[
+      { label: "หลักสูตร", options: catalog.programs.map(item => ({ value: `program:${item.value}`, label: item.label })) },
+      { label: "รายวิชา", options: catalog.courses.map(item => ({ value: `course:${item.value}`, label: `${item.label} (${item.program})` })) },
+    ]}
+    onChange={selection => {
+      if (selection.startsWith("course:")) {
+        const course = catalog.courses.find(item => item.value === selection.slice(7));
+        if (course) onChange?.(course.program, course.value);
+      } else onChange?.(selection.slice(8), undefined);
+    }} notFoundContent="ไม่พบหลักสูตรหรือรายวิชาที่เปิดใช้งาน เพิ่มรายวิชาได้ในตั้งค่าข้อมูลพื้นฐาน → รายวิชา" />;
+}
 
 export default function QualityDocumentForm({ userId, catalog, initialDocumentId }: { userId: string; catalog: DocumentCatalog; initialDocumentId?: string }) {
   const [form] = Form.useForm<DocumentFormValues>();
@@ -38,8 +56,29 @@ export default function QualityDocumentForm({ userId, catalog, initialDocumentId
   const prefix = buildDocumentPrefix(values, catalog);
   const revisionMode = values.documentMode === "revision";
   const target = targets.find(document => document.id === values.documentId);
-  const code = revisionMode ? target?.code ?? null : prefix ? `${prefix}-XXX` : null;
+  const [numberAttempt, setNumberAttempt] = useState(0);
+  const [numberPreview, setNumberPreview] = useState<{ key: string; code?: string; error?: string } | null>(null);
+  const numberKey = `${prefix ?? ""}:${values.courseId ?? ""}:${numberAttempt}`;
+  const code = revisionMode ? target?.code ?? null : numberPreview?.key === numberKey ? numberPreview.code ?? null : null;
+  const numberError = !revisionMode && numberPreview?.key === numberKey ? numberPreview.error : null;
+  const selectedCourse = (catalog.courses ?? []).find(item => item.value === values.courseId);
   const isManagement = department ? !department.hasSubDepartment : false;
+
+  useEffect(() => {
+    if (revisionMode || !prefix) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const payload = new FormData();
+      for (const [key, value] of Object.entries({ department: values.department, job: values.job, program: values.curriculum, level: values.level, criterion: values.criterion, courseId: values.courseId })) payload.set(key, value ?? "");
+      startTransition(async () => {
+        try {
+          const result = await previewQualityDocumentNumberAction(payload);
+          if (!cancelled) setNumberPreview(result.ok ? { key: numberKey, code: result.documentCode } : { key: numberKey, error: result.error });
+        } catch { if (!cancelled) setNumberPreview({ key: numberKey, error: "โหลดลำดับเอกสารไม่สำเร็จ กรุณาลองใหม่" }); }
+      });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [revisionMode, prefix, numberKey, values.department, values.job, values.curriculum, values.level, values.criterion, values.courseId]);
 
   useEffect(() => {
     if (initialDocumentId) return;
@@ -93,6 +132,11 @@ export default function QualityDocumentForm({ userId, catalog, initialDocumentId
   function saveDocument() {
     const current = form.getFieldsValue(true) as DocumentFormValues;
     const payload = new FormData();
+    if (current.documentMode !== "revision") {
+      if (!code) { toast.error("กรุณารอรหัสเอกสารก่อนบันทึก"); return; }
+      payload.set("expectedDocumentCode", code);
+      payload.set("courseId", current.job === "TCH" ? current.courseId ?? "" : "");
+    }
     for (const [key, value] of Object.entries({ department: current.department, job: current.job, program: current.curriculum, level: current.level, criterion: supportsDocumentCriterion(current.level) ? current.criterion : undefined, title: current.title, description: current.description, effectiveDate: current.effectiveDate })) payload.set(key, value ?? "");
     if (current.documentMode === "revision") payload.set("documentId", current.documentId ?? "");
     const file = files[0]?.originFileObj as File | undefined;
@@ -101,7 +145,7 @@ export default function QualityDocumentForm({ userId, catalog, initialDocumentId
     startSaving(async () => {
       try {
         const result = await saveQualityDocumentAction(payload);
-        if (!result.ok) { toast.error(result.error); return; }
+        if (!result.ok) { toast.error(result.error); setReviewOpen(false); setNumberAttempt(value => value + 1); return; }
         setSavedCode(result.documentCode);
         setSavedId(result.documentId);
         setSavedStatus(result.status ?? "DRAFT"); setSavedDate(result.effectiveDate ?? "");
@@ -111,13 +155,14 @@ export default function QualityDocumentForm({ userId, catalog, initialDocumentId
     });
   }
   async function preview() {
-    try { await form.validateFields(); if (!files.length) { toast.error("กรุณาแนบไฟล์เอกสาร"); return; } setReviewOpen(true); }
+    try { await form.validateFields(); if (!code) { toast.error("กรุณารอรหัสเอกสารก่อนตรวจสอบ"); return; } if (!files.length) { toast.error("กรุณาแนบไฟล์เอกสาร"); return; } setReviewOpen(true); }
     catch { toast.error("กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน"); }
   }
   const summary = [
     { key: "department", label: "หน่วยงาน", children: department?.label || "—" },
     ...(!isManagement ? [{ key: "job", label: "ชื่องาน", children: jobOptions.find(item => item.value === values.job)?.label || "ไม่ระบุชื่องาน" }] : []),
     { key: "program", label: "หลักสูตร", children: curriculum?.label || "—" },
+    ...(selectedCourse ? [{ key: "course", label: "รายวิชา", children: selectedCourse.label }] : []),
     { key: "level", label: "ระดับเอกสาร", children: catalog.levels.find(item => item.value === values.level)?.label || "—" },
     ...(canSelectCriterion ? [{ key: "criterion", label: "เกณฑ์", children: values.criterion || "ไม่ผูกเกณฑ์" }] : []),
     { key: "effectiveDate", label: "วันที่มีผลใช้บังคับ", children: values.effectiveDate || "—" },
@@ -154,14 +199,16 @@ export default function QualityDocumentForm({ userId, catalog, initialDocumentId
           <div className="grid gap-x-4 sm:grid-cols-2">
             <Form.Item name="department" label="หน่วยงาน" rules={[{ required: true, message: "กรุณาเลือกหน่วยงาน" }]}>
               <Select placeholder="เลือกหน่วยงาน" options={catalog.departments.map(item => ({ value: item.value, label: item.label }))}
-                onChange={() => form.setFieldValue("job", undefined)} />
+                onChange={() => form.setFieldsValue({ job: undefined, courseId: undefined })} />
             </Form.Item>
             {!isManagement ? <Form.Item name="job" label="ชื่องาน (ไม่บังคับ)">
-              <Select allowClear={{ label: "ล้างชื่องาน" }} placeholder={values.department ? "ไม่ระบุชื่องาน" : "เลือกหน่วยงานก่อน"} disabled={saving || !department?.hasSubDepartment} options={jobOptions} />
+              <Select allowClear={{ label: "ล้างชื่องาน" }} placeholder={values.department ? "ไม่ระบุชื่องาน" : "เลือกหน่วยงานก่อน"} disabled={saving || !department?.hasSubDepartment} options={jobOptions} onChange={() => form.setFieldValue("courseId", undefined)} />
             </Form.Item> : <div className="qa-form-inline-note">หน่วยงานนี้ไม่มีงานย่อย</div>}
-            <Form.Item name="curriculum" label="หลักสูตร" rules={[{ required: true, message: "กรุณาเลือกหลักสูตร" }]}>
-              <Select placeholder="เลือกหลักสูตร" options={catalog.programs.map(item => ({ value: item.value, label: item.label }))}
-                onChange={() => form.setFieldValue("criterion", undefined)} />
+            <Form.Item name="curriculum" label={values.job === "TCH" ? "หลักสูตรหรือรายวิชา" : "หลักสูตร"} rules={[{ required: true, message: values.job === "TCH" ? "กรุณาเลือกหลักสูตรหรือรายวิชา" : "กรุณาเลือกหลักสูตร" }]}>
+              {values.job === "TCH" ? <TeachingScopeSelect catalog={catalog} courseId={values.courseId}
+                onChange={(program, courseId) => form.setFieldsValue({ curriculum: program, courseId, criterion: undefined })} />
+                : <Select placeholder="เลือกหลักสูตร" options={catalog.programs.map(item => ({ value: item.value, label: item.label }))}
+                  onChange={() => form.setFieldsValue({ criterion: undefined, courseId: undefined })} />}
             </Form.Item>
             <Form.Item name="level" label="ระดับเอกสาร" rules={[{ required: true, message: "กรุณาเลือกระดับเอกสาร" }]}>
               <Select placeholder="เลือกระดับเอกสาร" options={catalog.levels}
@@ -177,9 +224,10 @@ export default function QualityDocumentForm({ userId, catalog, initialDocumentId
           </>}
           <div className="qa-form-code-row">
             <div className="min-w-0 flex-1"><span className="text-xs text-muted">{revisionMode ? "รหัสเอกสารเดิม" : "รหัสเอกสาร · ลำดับอัตโนมัติ"}</span>
-              <output id="document-code-preview" className="mt-1 block break-all font-mono text-xs" aria-live="polite">{code || "เลือกหมวดหมู่เพื่อดูตัวอย่างรหัส"}</output>
+              <output id="document-code-preview" className="mt-1 block break-all font-mono text-xs" aria-live="polite">{code || (prefix && !revisionMode ? numberError || "กำลังตรวจสอบลำดับเอกสาร…" : "เลือกหมวดหมู่เพื่อดูรหัสเอกสาร")}</output>
+              {!revisionMode && prefix && <Button type="link" size="small" disabled={saving} onClick={() => setNumberAttempt(value => value + 1)}>ตรวจลำดับล่าสุด</Button>}
             </div>
-            <Popover trigger="click" title="รหัสเอกสาร" content={<div className="max-w-64 text-sm leading-6">ระบบกำหนดลำดับเริ่ม 001 เมื่อบันทึก<br />XXX เป็นตัวอย่างลำดับที่ยังไม่ได้กำหนด<br />รหัสเอกสารและเลขฉบับแยกกัน<br />ฉบับแรกคือ 000 และมีผลอัตโนมัติตามวันที่กำหนด</div>}>
+            <Popover trigger="click" title="รหัสเอกสาร" content={<div className="max-w-64 text-sm leading-6">แสดงลำดับถัดไปจากฐานข้อมูล เริ่ม 001 แยกตามหมวดหมู่และรายวิชา<br />หากลำดับเปลี่ยนก่อนบันทึก ระบบจะให้ตรวจรหัสใหม่ก่อน<br />รหัสเอกสารและเลขฉบับแยกกัน<br />ฉบับแรกคือ 000 และมีผลอัตโนมัติตามวันที่กำหนด</div>}>
               <Button type="text" size="small" aria-label="วิธีออกรหัสเอกสาร" icon={<Info size={16} aria-hidden="true" />} />
             </Popover>
           </div>
